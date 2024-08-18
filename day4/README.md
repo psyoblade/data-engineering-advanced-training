@@ -13,18 +13,29 @@
 cd ~/work/data-engineer-advanced-training
 git pull
 ```
-<br>
+### 1-2. 이전에 기동된 컨테이너가 있다면 종료합니다
 
-### 1-2. 실습을 위한 이미지를 내려받고 컨테이너를 기동합니다
+```bash
+# graceful shutdown
+cd ~/work/data-engineer-advanced-training/day3
+docker-compose down
+cd ~/work/data-engineer-advanced-training/day4
+docker-compose down
+
+# force shutdown
+docker rm -f $(docker ps -q --filter="label=com.docker.compose.project=day3")
+docker rm -f $(docker ps -q --filter="label=com.docker.compose.project=day4")
+```
+
+### 1-3. 실습을 위한 이미지를 내려받고 컨테이너를 기동합니다
+
 ```bash
 # terminal
 cd ~/work/data-engineer-advanced-training/day3
 docker-compose pull
 docker-compose up -d
 ```
-<br>
-
-### 1-3. 스파크 실습을 위해 노트북 페이지에 접속합니다
+### 1-4. 스파크 실습을 위해 노트북 페이지에 접속합니다
 
 > 노트북 로그를 확인하여 접속 주소와 토큰을 확인합니다
 

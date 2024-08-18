@@ -2,7 +2,7 @@
 .idea/
 backup/
 .template
-.DS_Store
+**/.DS_Store
 Untitled*.ipynb
 __pycache__/
 .ipynb_checkpoints/
