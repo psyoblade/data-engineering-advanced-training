@@ -1,5 +1,3 @@
-version: "3"
-
 services:
   ubuntu:
     image: psyoblade/data-engineer-ubuntu:20.04

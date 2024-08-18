@@ -1,5 +1,3 @@
-version: "3"
-
 services:
   fluentd:
     container_name: multi-process

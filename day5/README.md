@@ -16,26 +16,32 @@
 
 ```bash
 # terminal
-cd /home/ubuntu/work/data-engineer-advanced-training
+cd ~/work/data-engineer-advanced-training
 git pull
 
 # alias
 alias d="docker-compose"
 ```
 
-### 1-2. 이전에 기동된 컨테이너가 있다면 강제 종료합니다
+### 1-2. 이전에 기동된 컨테이너가 있다면 종료합니다
 
 ```bash
-# terminal 
-docker rm -f `docker ps -aq`
-`docker ps -a` 명령으로 결과가 없다면 모든 컨테이너가 종료되었다고 보시면 됩니다
+# graceful shutdown
+cd ~/work/data-engineer-advanced-training/day3
+docker-compose down
+cd ~/work/data-engineer-advanced-training/day4
+docker-compose down
+
+# force shutdown
+docker rm -f $(docker ps -q --filter="label=com.docker.compose.project=day3")
+docker rm -f $(docker ps -q --filter="label=com.docker.compose.project=day4")
 ```
 
 ### 1-3. 실습을 위한 이미지를 내려받고 컨테이너를 기동합니다
 
 ```bash
 # 컨테이너 기동
-cd /home/ubuntu/work/data-engineer-advanced-training/day5
+cd ~/work/data-engineer-advanced-training/day5
 docker-compose pull
 docker-compose up -d
 
@@ -70,8 +76,7 @@ docker-compose exec kafka bash
 ```bash
 # ./fluentd
 ./fluentd -c /etc/fluentd/fluent-http.conf
-```* curl 명령을 통해서 테스트
-```bash
+# curl 명령을 통해서 테스트
 curl -X POST -d 'json={"message":"hello"}' localhost:9881/debug
 ```
 
@@ -87,15 +92,15 @@ curl -X POST -d 'json={"message":"hello"}' localhost:9881/debug
 <source>
     @type tail
     @log_level info
-    path {수집 대상 파일명 혹은 경로}
-    pos_file /fluentd/source/movies.pos
+    path /fluentd/source/sample.tsv
+    pos_file /fluentd/source/debug.pos
     refresh_interval 10
     multiline_flush_interval 10
     rotate_wait 10
     open_on_every_update true
     emit_unmatched_lines true
     read_from_head true
-    tag {태그}
+    tag debug
     <parse>
         @type tsv
         time_type unixtime
@@ -105,7 +110,7 @@ curl -X POST -d 'json={"message":"hello"}' localhost:9881/debug
         keep_time_key true
     </parse>
 </source>
-<match {태그}>
+<match debug>
     type stdout
 </match>
 ```
@@ -134,7 +139,7 @@ curl -X POST -d 'json={"message":"hello"}' localhost:9881/debug
     open_on_every_update true
     emit_unmatched_lines true
     read_from_head true
-    tag {태그}
+    tag info
     <parse>
         @type tsv
         time_type unixtime
@@ -156,7 +161,7 @@ curl -X POST -d 'json={"message":"hello"}' localhost:9881/debug
 <match info>
     @type kafka2
 
-    brokers {카프카주소:포트}
+    brokers kafka:9093
     use_event_time false
 
     <buffer topic>
@@ -169,7 +174,7 @@ curl -X POST -d 'json={"message":"hello"}' localhost:9881/debug
         @type json
     </format>
 
-    default_topic {카프카토픽}
+    default_topic movies
     required_acks -1
     compression_codec gzip
 </match>
@@ -272,16 +277,17 @@ def displayStatus(name, query, iterations, sleep_secs):
 
 ```python
 kafkaReader = (
-    spark
+  spark
   .readStream
   .format("kafka")
-  .option("kafka.bootstrap.servers", "카프카주소:카프카포트")
-  .option("subscribe", "카프카토픽")
-  .option("startingOffsets", "카프카오프셋위치")
+  .option("kafka.bootstrap.servers", "kafka:9093")
+  .option("subscribe", "movies")
+  .option("startingOffsets", "earliest")
   .load()
 )
 kafkaReader.printSchema()
 
+# {"movie":"10225","title":"핑크 팬더 6 - 핑크 팬더의 추적","title_eng":"Trail Of The Pink Panther , 1982","year":0,"grade":"PG","time":"2022-07-17 04:19:42"}
 kafkaSchema = (
     StructType()
     .add(StructField("movie", StringType()))
@@ -289,8 +295,17 @@ kafkaSchema = (
     .add(StructField("title_eng", StringType()))
     .add(StructField("year", IntegerType()))
     .add(StructField("grade", StringType()))
+    .add(StructField("time", LongType()))
     .add(StructField("timestamp", StringType()))
 )
+# root
+#  |-- key: binary (nullable = true)
+#  |-- value: binary (nullable = true)
+#  |-- topic: string (nullable = true)
+#  |-- partition: integer (nullable = true)
+#  |-- offset: long (nullable = true)
+#  |-- timestamp: timestamp (nullable = true)
+#  |-- timestampType: integer (nullable = true)
 
 kafkaSelector = (
     kafkaReader
@@ -298,10 +313,15 @@ kafkaSelector = (
         col("key").cast("string"),
         from_json(col("value").cast("string"), kafkaSchema).alias("movies")
     )
+    # .selectExpr("movies.title as title", "movies.year as year")
     .selectExpr("movies.movie as key", "to_json(struct(movies.*)) as value")
 )
 
 kafkaSelector.printSchema()
+# root
+#  |-- title: string (nullable = true)
+#  |-- year: integer (nullable = true)
+
 ```
 
 ### 3-3. 디버깅을 위해 임시로 콘솔 출력을 통해 검증합니다
@@ -348,9 +368,9 @@ kafkaWriter = (
     .writeStream
     .queryName(queryName)
     .format("kafka")
-    .option("kafka.bootstrap.servers", "카프카주소:카프카포트")
-    .option("topic", "저장대상카프카토픽")
-    .outputMode("출력모드")
+    .option("kafka.bootstrap.servers", "kafka:9093")
+    .option("topic", "korean_movies")
+    .outputMode("append")
 )
 
 checkpointLocation = f"{work_dir}/tmp/{queryName}"
@@ -369,7 +389,7 @@ kafkaQuery.stop()
 
 ## 4. 카프카 토픽을 드루이드 `kafka-index`를 통해 적재합니다
 
->  드루이드에는 카프카 토픽에 저장된 데이터를 드루이드 테이블로 색인할 수 있는 엔진을 제공합니다. http://localhost:8088 으로 접속하여 관리자 도구를 통해 적재할 수 있습니다.  
+>  드루이드에는 카프카 토픽에 저장된 데이터를 드루이드 테이블로 색인할 수 있는 엔진을 제공합니다. http://localhost:8088 으로 접속하여 관리자 도구를 통해 적재할 수 있습니다. 
 
 ### 4-1. 드루이드 카프카 적재기를 통해 드루이드 테이블 색인을 수행합니다
 
@@ -427,7 +447,7 @@ kafkaQuery.stop()
 > 아래의 명령을 통해서 설정 파일을 생성하고, 수정하여 다시 덮어쓸 수도 있습니다
 
 ```bash
-docker-compose run turnilo turnilo --druid http://druid:8082 --print-config > turnilo/config/new-confing.yml
+docker-compose run turnilo turnilo --druid http://druid:8082 --print-config > turnilo/config/new-config.yml
 ```
 
 ### 5-2. 터닐로가 드루이드 테이블을 인식하게 하기 위해 컨테이너를 재시작합니다
@@ -521,9 +541,11 @@ docker-compose restart turnilo
 </match>
 ```
 
-* 신규로 생성한 에이전트를 다시 기동합니다
+* 테스트 데이터 및 오프셋 정보를 삭제하고, 신규로 생성한 에이전트를 다시 기동합니다
 
 ```bash
+rm -r /fluentd/source/movies/*.tsv
+rm -r /fluentd/source/movies.pos
 ./fluentd -c /fluentd/config/fluent-live.conf
 ```
 
@@ -534,7 +556,7 @@ docker-compose restart turnilo
 * `publish.sh` 파일을 통해 실시간으로 로그가 쌓이는 것을 시뮬레이션 합니다.
 
 ```bash
-# docker-compose exec fluetnd bash
+# docker-compose exec fluentd bash
 
 cd /fluentd/source/
 ./publish.sh movies.tsv
@@ -547,6 +569,10 @@ cd /fluentd/source/
 >  `TIMEZONE` 과 `AUTO UPDATE` 활성화를 통해 실시간 지표를 리프래시 할 수 있습니다.
 
 ![image-20220911200812839](images/auto-update.png)
+
+> `FILTER` 는 `Relative` - `LATEST` `1D` 설정, `SPLIT`  는 `Time(Hour)` , `MEASURE` 는 `Count` 설정입니다
+
+![필터 조건](images/turnilo-07.png)
 
 ## 7. 잘못 적재된 토픽을 삭제하고 다시 적재해야 하는 경우
 
@@ -591,7 +617,7 @@ cd /opt/kafka
 boot="--bootstrap-server localhost:9093"
 
 # 토픽목록
-bin/kafka-console-consumer.sh $boot --list
+bin/kafka-topics.sh $boot --list
 
 # 토픽삭제 : bin/kafka-topics.sh $boot --delete --topic "토픽이름"
 bin/kafka-console-consumer.sh $boot --from-beginning --topic movies
@@ -604,9 +630,8 @@ bin/kafka-console-consumer.sh $boot --from-beginning --topic korean_movies
 
 ```bash
 # docker-compose exec fluentd bash 
-
-cd /fluentd/source
-rm -r movies/*.tsv
+rm -r /fluentd/source/movies/*.tsv
+rm -r /fluentd/source/movies.pos
 ```
 
 > 여기까지 수행 되었다면 처음 실습을 시작하는 환경으로 모든 상태가 리셋 되었다고 말할 수 있습니다.
@@ -618,8 +643,8 @@ rm -r movies/*.tsv
 sudo systemctl restart docker.service
 ```
 
-
 ## 레퍼런스
+
 * [java. duration](https://docs.oracle.com/javase/8/docs/api/java/time/Duration.html)
 * [fluentd parse](https://docs.fluentd.org/configuration/parse-section)
 * [fluentd kafka](https://docs.fluentd.org/output/kafka)
